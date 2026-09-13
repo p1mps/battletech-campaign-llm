@@ -12,13 +12,12 @@ This project provides a complete AI-driven campaign management solution for Batt
 
 1. **Helm Memory Core** - Download from [https://github.com/p1mps/helm](https://github.com/p1mps/helm)
 2. **MegaMek** - Required for tactical battles
-3. **Context-Mode** - Already active in this session
 
 ### Setup Instructions
 
 1. Install Helm following the instructions at [https://github.com/p1mps/helm](https://github.com/p1mps/helm)
 2. Generate the Helm SQLite database
-3. Copy the MegaMek files from Helm to your project directory after generating the database
+3. Download megamek here [https://megamek.org/downloads.html](https://megamek.org/downloads.html) and copy it to your project directory
 
 ### Configuration
 
@@ -97,21 +96,6 @@ Here's how the LLM-driven campaign might unfold:
 - **Contract Negotiation System**: Handles reputation spending and step swapping rules
 - **Tactical Integration**: Seamless connection with MegaMek for battle simulation
 - **Post-Battle Processing**: Automatic calculation of combat pay, repairs, and salvage
-
-## Context-Mode Usage
-
-This project leverages context-mode for efficient information management with the following hierarchy:
-
-1. **ctx_batch_execute** - Multi-command research and batch operations
-2. **ctx_execute** - Single command execution with sandboxed code  
-3. **ctx_execute_file** - File-based operations and analysis (read/edit files)
-4. **ctx_search** - Searching indexed documentation and campaign data
-5. **ctx_fetch_and_index** - Web research integration (web pages)
-6. **ctx_index** - Indexing documentation and reference materials
-7. **ctx_stats** - Session statistics and usage tracking
-8. **ctx_doctor** - System diagnostics and troubleshooting
-9. **ctx_upgrade** - Version upgrades and maintenance
-10. **ctx_purge** - Data cleanup and session management
 
 ## Technical Integration Points
 
