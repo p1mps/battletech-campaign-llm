@@ -156,6 +156,16 @@ python3 helm_lore_filter.py --source "TR:CI" --filter "Smoke Jaguar" --output js
 Use this server to initialize tactical scenarios and parse their post-game aftermath.
 
 - **`megamek:initialize_game`**: Compile .mul files and output setup configurations before tabletop play.
+
+  **⚠ MANDATORY SKILL ENFORCEMENT:** Every call to `megamek:initialize_game` MUST be preceded by executing the `megamek-scenario-generation` skill (path: `~/.pi/agent/projects-memory/battletech-campaign-llm/skills/megamek-scenario-generation/SKILL.md`). This is not optional. The skill enforces unit validation, board existence checks, and mandatory parameter injection.
+
+  **The skill requires the following parameters — all are MANDATORY. Omitting any one is a rules violation:**
+  - **`deployment_zones`** — randomly assign one axis using abbreviated edge codes: (Player: "S", OPFOR: "N") OR (Player: "N", OPFOR: "S") OR (Player: "W", OPFOR: "E") OR (Player: "E", OPFOR: "W"). Randomize the axis each scenario — never reuse the same orientation twice in a row. **Never omit this.** Hardcoded `at: [x, y]` hex positions are forbidden.
+  - **`player_camo`** — path to a camo image from the player's faction subfolder (e.g., `"data/images/camo/Draconis Combine/Genyosha.jpg"`). **Never omit this.**
+  - **`opfor_camo`** — path to a camo image from the OPFOR's faction subfolder (e.g., `"data/images/camo/Federated Suns/Davion Guards.jpg"`). **Never omit this.**
+  - **`princess_settings`** — always include with `{"enabled": true, "aggression": "aggressive", "selfpreservation": 5, "hyperaggression": 7}`. This ensures the Princess bot AI plays aggressively. **Never omit this.**
+
+  **Example (correct):**
   ```json
   {
     "name": "megamek:initialize_game",
@@ -165,6 +175,10 @@ Use this server to initialize tactical scenarios and parse their post-game after
       "gravity": 1.0,
       "temperature": 25,
       "environmental_rules": ["Double Ranges for Range Modifiers"],
+      "deployment_zones": { "Player": { "edge": "W" }, "OPFOR": { "edge": "E" } },
+      "player_camo": "data/images/camo/Draconis Combine/Genyosha.jpg",
+      "opfor_camo": "data/images/camo/Federated Suns/Davion Guards.jpg",
+      "princess_settings": { "enabled": true, "aggression": "aggressive", "selfpreservation": 5, "hyperaggression": 7 },
       "player_force": [
         {
           "unit": "Caesar CES-3R",

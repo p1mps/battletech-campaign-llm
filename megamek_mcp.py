@@ -7,7 +7,6 @@ MegaMek V2 reads .mms files directly via the Scenario Chooser.
 
 Full V2 feature support:
   - Map: single/multi-board, surprise boards, atmospheric/space/highaltitude, embed, postprocess (settheme, removeterrain, convertterrain, addterrain, hexlevel), board columns/rows
-  - Planetary: temperature, gravity, pressure, light, weather, wind (strength/direction/shifting), fog, blowingsand, emi, terrainchanges
   - Factions: units with full V2 properties (callsign, hits, portrait, force chain, board, elevation/altitude, remaining armor/structure, ammo, bombs), objects (carryable briefcases/crates), minefields (conventional/command/vibra)
   - Bots: Princess settings (selfpreservation, fallshame, hyperaggression, herdmentality, bravery, forcedwithdrawal, withdrawto, flee, fleeto, goHome, strategicBuildingTargets, priorityUnitTargets)
   - Networks: C3 (C3i, C3S, C3M), transports (carrier -> carried units)
@@ -92,13 +91,13 @@ def _resolve_mapsheet_to_path(mapsheet_name):
         if lookup in display.lower():
             return relpath
 
-    # 4. Return as-is; MegaMek will give a clear error on load if invalid
-    log(f"WARNING: Could not resolve mapsheet '{mapsheet_name}' to a local .board file. "
-        f"Using name as-is; loading may fail.")
-    return mapsheet_name
+    # 4. FAIL: board not found — return None instead of returning as-is
+    log(f"ERROR: Board '{mapsheet_name}' not found in local board inventory. "
+        f"Available boards can be listed via the board_inventory endpoint.")
+    return None
 
 # Define storage directory for local scenario files
-SAVE_DIR = "./megamek/scenarios"
+SAVE_DIR = "./megamek/data/scenarios"
 
 # Local MegaMek board directory — scan for all .board files at startup
 MEGAMEK_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "megamek", "data", "boards")
@@ -134,7 +133,6 @@ def generate_mms_scenario(scenario_id, arguments):
     The .mms file is the single source of truth that MegaMek V2 loads
     via the Scenario Chooser.  It contains:
       - map configuration
-      - planetary conditions (temperature, gravity, weather, etc.)
       - factions (with name, deploy zone, minefields, camo)
       - units (fullname, crew/pilot, position, status)
       - optional: game options, victory conditions, messages
@@ -145,9 +143,6 @@ def generate_mms_scenario(scenario_id, arguments):
     player_force = arguments.get("player_force", [])
     opfor_force = arguments.get("opfor_force", [])
     mapsheets = arguments.get("mapsheets", [DEFAULT_MAP])
-    gravity = arguments.get("gravity", 1.0)
-    temperature = arguments.get("temperature", 25)
-    environmental_rules = arguments.get("environmental_rules", [])
     scenario_name = arguments.get("scenario_name", scenario_id)
     scenario_description = arguments.get("scenario_description", f"Scenario: {scenario_id}")
     deployment_zones = arguments.get("deployment_zones", {})
@@ -174,15 +169,7 @@ def generate_mms_scenario(scenario_id, arguments):
     map_config = arguments.get("map_config", None)
     # NEW: options (enable/disable game options)
     game_options = arguments.get("game_options", None)
-    # NEW: planetary conditions beyond temp/gravity
-    pressure = arguments.get("pressure", None)
-    light_condition = arguments.get("light", None)
-    weather_condition = arguments.get("weather", None)
-    wind_config = arguments.get("wind", None)
-    fog_level = arguments.get("fog", None)
-    blowingsand = arguments.get("blowingsand", None)
-    emi = arguments.get("emi", None)
-    terrainchanges = arguments.get("terrainchanges", None)
+
     # NEW: bot settings per faction
     player_bot = arguments.get("player_bot", None)
     # NEW: team assignment
@@ -191,8 +178,17 @@ def generate_mms_scenario(scenario_id, arguments):
 
     # Normalize mapsheets — resolve display names to actual .board file paths
     resolved_mapsheets = [_resolve_mapsheet_to_path(m) for m in mapsheets]
+    # Filter out None (unresolved boards)
+    resolved_mapsheets = [r for r in resolved_mapsheets if r is not None]
     if not resolved_mapsheets:
-        resolved_mapsheets = [DEFAULT_MAP]
+        # Fall back to a known available board
+        _scan_board_inventory()
+        default_board = _board_inventory[0] if _board_inventory else None
+        if not default_board:
+            return {"error": "No board files found in MegaMek data directory."}
+        log(f"WARNING: None of the requested mapsheets were found. "
+            f"Falling back to '{default_board}'.")
+        resolved_mapsheets = [default_board]
 
     # Build the scenario dictionary
     scenario = {}
@@ -223,61 +219,7 @@ def generate_mms_scenario(scenario_id, arguments):
             "boards": [{"file": b} for b in resolved_mapsheets],
         }
 
-    # --- Planetary / environmental conditions ---
-    scenario["fixedplanetaryconditions"] = True
-
-    planetary = {
-        "temperature": temperature,
-        "gravity": gravity,
-    }
-
-    # Explicit overrides (take priority over environmental_rules parsing)
-    if pressure:
-        planetary["pressure"] = pressure
-    if light_condition:
-        planetary["light"] = light_condition
-    if weather_condition:
-        planetary["weather"] = weather_condition
-    if wind_config:
-        planetary["wind"] = wind_config
-    if fog_level:
-        planetary["fog"] = fog_level
-    if blowingsand is not None:
-        planetary["blowingsand"] = blowingsand
-    if emi is not None:
-        planetary["emi"] = emi
-    if terrainchanges is not None:
-        planetary["terrainchanges"] = terrainchanges
-
-    # Also parse environmental_rules for convenience
-    weather_map = {
-        "rain": "gusting rain",
-        "light rain": "light rain",
-        "heavy rain": "heavy rain",
-        "snow": "moderate snow",
-        "blizzard": "blizzard",
-        "fog": "light",
-        "dust": "blowingsand",
-    }
-    light_map = {
-        "day": "day",
-        "dusk": "dusk",
-        "night": "full moon",
-        "dark": "pitchblack",
-    }
-
-    for rule in environmental_rules:
-        rule_lower = rule.lower()
-        if rule_lower in weather_map and "weather" not in planetary:
-            planetary["weather"] = weather_map[rule_lower]
-        elif rule_lower in light_map and "light" not in planetary:
-            planetary["light"] = light_map[rule_lower]
-        elif "gravity" in rule_lower and "gravity" not in planetary:
-            g_match = re.search(r"([\d.]+)", rule_lower)
-            if g_match:
-                planetary["gravity"] = float(g_match.group(1))
-
-    scenario["planetaryconditions"] = planetary
+    # No planetary conditions — defaults to standard Inner Sphere conditions
 
     # --- Game options (enable/disable) ---
     if game_options:
@@ -517,7 +459,7 @@ def generate_mms_scenario(scenario_id, arguments):
     inserted = False
     team_lines = []
     for fname, team_num in sorted(team_assignments.items(), key=lambda x: x[1]):
-        team_lines.append(f"Team_{fname}={team_num}")
+        team_lines.append(f"Team_{fname}: {team_num}")
     
     if team_lines:
         # Find the line after 'description:' to insert team assignments
@@ -549,6 +491,23 @@ def generate_mms_scenario(scenario_id, arguments):
     
     with open(mms_path, "w", encoding="utf-8") as f:
         f.write('\n'.join(lines))
+
+    # --- Post-write validation: re-parse the written .mms file ---
+    try:
+        with open(mms_path, "r", encoding="utf-8") as f:
+            parsed = yaml.safe_load(f)
+        if parsed is None:
+            return {"error": f"Generated .mms file is empty or invalid YAML: {mms_path}"}
+        # Verify critical keys exist
+        required_keys = ["MMSVersion", "name", "factions"]
+        missing = [k for k in required_keys if k not in parsed]
+        if missing:
+            return {"error": f"Generated .mms missing required keys: {missing}. File: {mms_path}"}
+        log(f"Post-write validation passed for {mms_path}")
+    except yaml.YAMLError as e:
+        return {"error": f"Generated .mms contains invalid YAML: {e}\\nFile: {mms_path}"}
+    except FileNotFoundError:
+        return {"error": f"Generated .mms file not found after write: {mms_path}"}
 
     log(f"Generated .mms scenario: {mms_path}")
     return mms_path
@@ -989,7 +948,6 @@ def tool_initialize_game(arguments):
 
     The .mms file contains everything MegaMek needs:
       - Map (defaults to an official '16x17 Grassland 1.board')
-      - Planetary conditions (temperature, gravity, weather)
       - Player and OPFOR factions with units, pilots, and deployment zones
       - Optional: Princess bot AI config, victory conditions, messages
 
@@ -1013,18 +971,12 @@ def tool_initialize_game(arguments):
     # Print config summary
     mapsheets = arguments.get("mapsheets", [DEFAULT_MAP])
     resolved_mapsheets = [_resolve_mapsheet_to_path(m) for m in mapsheets]
-    temperature = arguments.get("temperature", 25)
-    gravity = arguments.get("gravity", 1.0)
-    env_rules = arguments.get("environmental_rules", [])
 
     msg = (
         f"Success: Scenario '{scenario_id}' compiled.\n\n"
         f"Generated .mms file: {abs_path}\n\n"
         f"Scenario Details:\n"
         f"  Map(s): {', '.join(resolved_mapsheets)}\n"
-        f"  Temperature: {temperature}°C\n"
-        f"  Gravity: {gravity}g\n"
-        f"  Environmental: {', '.join(env_rules) if env_rules else 'Standard'}\n"
         f"  Player units: {len(player_force)}\n"
         f"  OPFOR units: {len(opfor_force)}\n\n"
         f"To load in MegaMek:\n"
@@ -1033,7 +985,7 @@ def tool_initialize_game(arguments):
         f"  3. Find and select '{scenario_id}.mms'\n"
         f"  4. Host the game and start playing!\n\n"
         f"Note: The .mms file is self-contained — it defines the map, "
-        f"units, pilots, deployment, and planetary conditions all in one file."
+        f"units, pilots, and deployment all in one file."
     )
 
     return {
@@ -1265,59 +1217,6 @@ def handle_request(req):
                                         "'postprocess' (settheme, removeterrain, convertterrain, addterrain, hexlevel), "
                                         "'type' (sky/space/highaltitude with width/height), 'embed' (embed maps in sky), "
                                         "'modify' (rotate), 'file', 'name', 'boardcolumns', 'boardrows'"
-                                    ),
-                                },
-                                "temperature": {
-                                    "type": "number",
-                                    "description": "Planetary temperature in Celsius (default: 25)",
-                                },
-                                "gravity": {
-                                    "type": "number",
-                                    "description": "Planetary gravity in G (default: 1.0)",
-                                },
-                                # NEW: explicit planetary conditions
-                                "pressure": {
-                                    "type": "string",
-                                    "description": "Atmospheric pressure: 'standard', 'vacuum', 'trace', 'thin', 'high', 'very high' (optional)",
-                                },
-                                "light": {
-                                    "type": "string",
-                                    "description": "Lighting: 'day', 'dusk', 'full moon', 'moonless', 'pitchblack' (optional)",
-                                },
-                                "weather": {
-                                    "type": "string",
-                                    "description": ("Weather: 'none', 'light rain', 'moderate rain', 'heavy rain', "
-                                        "'gusting rain', 'downpour', 'light snow', 'moderate snow', 'heavy snow', "
-                                        "'snow flurries', 'sleet', 'blizzard', 'ice storm' (optional)"),
-                                },
-                                "wind": {
-                                    "type": "object",
-                                    "description": ("Wind config: 'strength' (none/light gale/moderate gale/strong gale/storm/tornado/tornado f4), "
-                                        "'direction' (N/NE/SE/S/SW/NW/random), 'shifting' (yes/no) (optional)"),
-                                },
-                                "fog": {
-                                    "type": "string",
-                                    "description": "Fog level: 'none', 'light', 'heavy' (optional)",
-                                },
-                                "blowingsand": {
-                                    "type": "boolean",
-                                    "description": "Enable blowing sand (optional)",
-                                },
-                                "emi": {
-                                    "type": "boolean",
-                                    "description": "Enable EMI effects (optional)",
-                                },
-                                "terrainchanges": {
-                                    "type": "boolean",
-                                    "description": "Enable terrain changes over time (optional, default: true)",
-                                },
-                                "environmental_rules": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "description": (
-                                        "Convenience environmental conditions: 'rain', 'light rain', 'heavy rain', "
-                                        "'snow', 'blizzard', 'fog', 'dust', 'day', 'dusk', 'night'. "
-                                        "These are parsed into proper MegaMek values. Explicit planetary conditions override."
                                     ),
                                 },
                                 # NEW: game options
@@ -1694,11 +1593,12 @@ def handle_request(req):
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
 
-        if tool_name in ("megamek_initialize_game", "megamek:initialize_game"):
+        # Accept both direct names and gateway-transformed names (server_prefixed)
+        if tool_name in ("megamek_initialize_game", "megamek:initialize_game", "megamek-generator_megamek:initialize_game"):
             result = tool_initialize_game(arguments)
-        elif tool_name in ("megamek_launch_megamek", "megamek:launch_megamek"):
+        elif tool_name in ("megamek_launch_megamek", "megamek:launch_megamek", "megamek-generator_megamek:launch_megamek"):
             result = tool_launch_megamek(arguments)
-        elif tool_name in ("megamek_read_after_action_report", "megamek:read_after_action_report"):
+        elif tool_name in ("megamek_read_after_action_report", "megamek:read_after_action_report", "megamek-generator_megamek:read_after_action_report"):
             result = tool_read_after_action_report(arguments)
         else:
             return {
